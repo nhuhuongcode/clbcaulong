@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Quỹ CLB Cầu lông</title>
+<meta name="description" content="Quản lý tiền sân, tiền cầu và công nợ của câu lạc bộ cầu lông.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏸</text></svg>">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="logo">🏸</span><span id="clubName">Quỹ CLB Cầu lông</span></div>
+  <div class="topbar-right">
+    <span id="syncBadge" class="badge badge-muted" title="Trạng thái lưu">…</span>
+    <button id="btnSave" class="btn btn-primary btn-sm">Lưu</button>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-page="overview">Tổng quan</button>
+  <button class="tab" data-page="collect">Bảng thu tiền</button>
+  <button class="tab" data-page="sessions">Buổi đánh</button>
+  <button class="tab" data-page="shuttles">Tiền cầu</button>
+  <button class="tab" data-page="register">Đăng ký tháng</button>
+  <button class="tab" data-page="members">Thành viên</button>
+  <button class="tab" data-page="settings">Cài đặt</button>
+</nav>
+
+<div class="monthbar">
+  <button class="btn btn-ghost" id="prevMonth" aria-label="Tháng trước">‹</button>
+  <input type="month" id="monthPicker">
+  <button class="btn btn-ghost" id="nextMonth" aria-label="Tháng sau">›</button>
+  <span class="spacer"></span>
+  <span id="monthMeta" class="muted small"></span>
+</div>
+
+<main id="main"></main>
+
+<div id="toast" class="toast" hidden></div>
+
+<dialog id="modal">
+  <form method="dialog" id="modalForm">
+    <h3 id="modalTitle">Tiêu đề</h3>
+    <div id="modalBody"></div>
+    <menu>
+      <button value="cancel" class="btn btn-ghost" type="submit" formnovalidate>Huỷ</button>
+      <button value="ok" class="btn btn-primary" type="submit" id="modalOk">Lưu</button>
+    </menu>
+  </form>
+</dialog>
+
+<script src="assets/calc.js"></script>
+<script src="assets/api.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
