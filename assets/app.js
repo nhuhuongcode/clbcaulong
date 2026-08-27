@@ -35,6 +35,23 @@
     failures: 0,    // số lần lưu hỏng liên tiếp (để giãn nhịp thử lại)
   };
 
+  /**
+   * Lượt vãng lai có thuộc buổi này không.
+   * Bản ghi mới luôn có sessionId. Bản ghi cũ chỉ có ngày -> chỉ suy ra được
+   * khi ngày đó có duy nhất một nhóm; ngày nhiều nhóm thì để engine cảnh báo
+   * chứ không gán bừa (nếu không sẽ đếm trùng và xoá lây sang buổi khác).
+   */
+  function guestBelongs(g, s) {
+    // sessionId trỏ tới buổi đã bị xoá thì coi như không có, suy lại theo ngày
+    // (giống hệt cách engine trong calc.js xử lý, để UI và số liệu không lệch).
+    if (g.sessionId && S.db.sessions.some((x) => x.id === g.sessionId && x.month === g.month)) {
+      return g.sessionId === s.id;
+    }
+    if (g.date !== s.date) return false;
+    const groups = new Set(S.db.sessions.filter((x) => x.date === s.date).map((x) => x.group));
+    return groups.size <= 1;
+  }
+
   const memberName = (id) => {
     const m = S.db.members.find((x) => x.id === id);
     return m ? m.name : '(đã xoá)';
@@ -89,6 +106,19 @@
       options.map((o) => `<option value="${esc(o.v)}"${String(o.v) === String(value) ? ' selected' : ''}>${esc(o.t)}</option>`).join('') +
       `</select></label>`;
   }
+  /**
+   * Ô chọn nhóm buổi: gợi ý các nhóm đang có trong tháng, vẫn cho gõ tên mới.
+   * Để trống = tự lấy theo thứ trong tuần của ngày đã chọn.
+   */
+  function groupField(value) {
+    const opts = Calc.sortGroups(Array.from(new Set(
+      Calc.monthGroups(S.db, S.month).concat(Calc.DOW))));
+    return `<label class="field"><span>Nhóm buổi (để trống = theo thứ trong tuần)</span>
+      <input name="group" list="groupList" value="${esc(value || '')}" placeholder="vd: T3">
+      <datalist id="groupList">${opts.map((g) => `<option value="${esc(g)}">`).join('')}</datalist>
+    </label>`;
+  }
+
   const memberOptions = (blankLabel) =>
     (blankLabel ? [{ v: '', t: blankLabel }] : []).concat(
       S.db.members.filter((m) => m.active).map((m) => ({ v: m.id, t: m.name })));
@@ -184,10 +214,31 @@
         <div class="stat"><div class="k">Số buổi</div><div class="v">${r.sessionCount}</div></div>
         <div class="stat"><div class="k">Tổng tiền sân</div><div class="v small">${vnd(r.courtTotal)}</div></div>
         <div class="stat"><div class="k">Người cố định</div><div class="v">${r.fixedCount}</div></div>
-        <div class="stat hl"><div class="k">Tiền sân / người</div><div class="v small">${vnd(r.courtShare)}</div></div>
-        <div class="stat"><div class="k">Tiền cầu</div><div class="v small">${vnd(r.shuttleTotal)}${r.shuttleTotal ? ` <span class="muted small">(${vnd(r.shuttleShare)}/ng)</span>` : ''}</div></div>
-        <div class="stat"><div class="k">Thu vãng lai</div><div class="v small">${vnd(r.guestTotal)}${r.guestTotal ? ` <span class="muted small">(hoàn ${vnd(r.guestCredit)}/ng)</span>` : ''}</div></div>
+        <div class="stat"><div class="k">Tiền cầu</div><div class="v small">${vnd(r.shuttleTotal)}</div></div>
+        <div class="stat"><div class="k">Thu vãng lai</div><div class="v small">${vnd(r.guestTotal)}</div></div>
       </div>
+    </section>
+
+    <section class="card">
+      <h2>Tiền sân từng buổi trong tuần</h2>
+      <p class="sub">Mỗi nhóm chia riêng cho người đăng ký nhóm đó. Ai đăng ký cả hai thì cộng lại.</p>
+      ${r.groups.length ? `<div class="table-wrap"><table>
+        <thead><tr><th>Buổi</th><th class="num">Số buổi</th><th class="num">Tiền sân</th>
+          <th class="num">Người cố định</th><th class="num">Thu vãng lai</th>
+          <th class="num">Hoàn/người</th><th class="num">Phải đóng/người</th></tr></thead>
+        <tbody>${r.groups.map((g) => `<tr>
+          <td><b>${esc(g.name)}</b></td>
+          <td class="num">${g.sessionCount}</td>
+          <td class="num">${vnd(g.courtTotal)}</td>
+          <td class="num">${g.memberCount || '<span class="pos">0</span>'}</td>
+          <td class="num">${g.guestTotal ? vnd(g.guestTotal) : '–'}</td>
+          <td class="num neg">${g.guestCredit ? '-' + vnd(g.guestCredit) : '–'}</td>
+          <td class="num"><b>${vnd(g.courtShare - g.guestCredit)}</b></td>
+        </tr>`).join('')}</tbody></table></div>
+        ${r.groups.some((g) => g.sessionCount && !g.memberCount)
+          ? `<div class="note" style="margin-top:14px">Có nhóm buổi chưa ai đăng ký cố định —
+             tiền sân của nhóm đó hiện chưa được chia cho ai. Vào tab <b>Đăng ký tháng</b> để tick.</div>` : ''}`
+        : '<div class="empty">Chưa có buổi đánh nào trong tháng.</div>'}
     </section>
 
     <section class="card">
@@ -239,6 +290,7 @@
           : '<span class="badge badge-danger">Chưa đóng</span>');
       return `<tr>
         <td><b>${esc(x.name)}</b>${x.isFixed ? '' : ' <span class="badge badge-muted">vãng lai</span>'}</td>
+        <td>${x.groups.length ? x.groups.map((g) => `<span class="badge badge-accent" style="margin-right:3px">${esc(g)}</span>`).join('') : '<span class="muted">–</span>'}</td>
         <td class="num ${x.opening > 0 ? 'pos' : x.opening < 0 ? 'neg' : 'muted'}">${x.opening ? vnd(x.opening) : '–'}</td>
         <td class="num">${x.courtShare ? vnd(x.courtShare) : '–'}</td>
         <td class="num">${x.shuttleShare ? vnd(x.shuttleShare) : '–'}</td>
@@ -260,7 +312,8 @@
     <section class="card">
       <div class="card-head">
         <div><h2>Bảng thu tiền ${Calc.fmtMonthVi(S.month)}</h2>
-          <p class="sub">Cần đóng = nợ/dư cũ + tiền sân + tiền cầu − hoàn vãng lai − cầu đã ứng mua.</p></div>
+          <p class="sub">Cần đóng = nợ/dư cũ + tiền sân (cộng các nhóm đã đăng ký) + tiền cầu
+            − hoàn vãng lai − cầu đã ứng mua.</p></div>
         <div class="toolbar">
           <button class="btn btn-sm" data-act="copy-msg">Sao chép tin nhắn</button>
           <button class="btn btn-sm" data-act="export-csv">Xuất CSV</button>
@@ -268,7 +321,7 @@
       </div>
       <div class="table-wrap"><table>
         <thead><tr>
-          <th>Thành viên</th><th class="num">Nợ/dư cũ</th><th class="num">Tiền sân</th>
+          <th>Thành viên</th><th>Buổi</th><th class="num">Nợ/dư cũ</th><th class="num">Tiền sân</th>
           <th class="num">Tiền cầu</th><th class="num">Hoàn vãng lai</th><th class="num">Cầu đã mua</th>
           <th class="num">Phí vãng lai</th><th class="num">Cần đóng</th><th class="num">Đã đóng</th>
           <th>Trạng thái</th><th></th>
@@ -276,6 +329,7 @@
         <tbody>${r.rows.map(row).join('')}</tbody>
         <tfoot><tr>
           <td>Tổng</td>
+          <td></td>
           <td class="num">${vnd(sum('opening'))}</td>
           <td class="num">${vnd(sum('courtShare'))}</td>
           <td class="num">${vnd(sum('shuttleShare'))}</td>
@@ -338,9 +392,10 @@
     const guests = S.db.guests.filter((g) => g.month === S.month);
 
     const list = sessions.length ? sessions.map((s) => {
-      const gs = guests.filter((g) => g.date === s.date);
+      const gs = guests.filter((g) => guestBelongs(g, s));
       return `<tr>
         <td><b>${dayLabel(s.date)}</b></td>
+        <td><span class="badge badge-accent">${esc(s.group)}</span></td>
         <td class="num">${vnd(s.cost != null ? s.cost : cfg.courtFee)}</td>
         <td>${gs.length
           ? gs.map((g) => `<span class="badge badge-muted" style="margin:1px 3px 1px 0">${esc(g.memberId ? memberName(g.memberId) : g.name)} ${vnd(g.amount)}</span>`).join('')
@@ -348,13 +403,16 @@
         <td class="num">${gs.length ? vnd(gs.reduce((t, g) => t + g.amount, 0)) : '–'}</td>
         <td class="muted">${esc(s.note)}</td>
         <td class="row-actions">
-          <button class="btn btn-sm" data-act="add-guest" data-date="${esc(s.date)}">+ Vãng lai</button>
+          <button class="btn btn-sm" data-act="add-guest" data-session="${esc(s.id)}">+ Vãng lai</button>
           <button class="btn btn-sm btn-ghost" data-act="edit-session" data-id="${esc(s.id)}">Sửa</button>
           <button class="btn btn-sm btn-danger" data-act="del-session" data-id="${esc(s.id)}">Xoá</button>
         </td></tr>`;
     }).join('') : '';
 
-    const orphan = guests.filter((g) => !sessions.some((s) => s.date === g.date));
+    const r = rep();
+    const dupDays = Array.from(new Set(sessions
+      .filter((s, i, arr) => arr.some((o) => o.date === s.date && o.group !== s.group))
+      .map((s) => s.date)));
 
     return `
     <section class="card">
@@ -367,8 +425,10 @@
         </div>
       </div>
       ${list ? `<div class="table-wrap"><table>
-        <thead><tr><th>Ngày</th><th class="num">Tiền sân</th><th>Vãng lai</th><th class="num">Thu</th><th>Ghi chú</th><th></th></tr></thead>
-        <tbody>${list}</tbody></table></div>`
+        <thead><tr><th>Ngày</th><th>Nhóm</th><th class="num">Tiền sân</th><th>Vãng lai</th><th class="num">Thu</th><th>Ghi chú</th><th></th></tr></thead>
+        <tbody>${list}</tbody></table></div>
+        <p class="hint" style="margin-top:10px">Nhóm quyết định tiền sân buổi đó chia cho ai.
+        Buổi đá bù vào ngày khác vẫn để đúng nhóm cũ (vd buổi T3 dời sang T4 thì giữ nhóm <b>T3</b>).</p>`
         : '<div class="empty">Chưa có buổi nào. Bấm <b>Tạo nhanh cả tháng</b> để sinh lịch theo thứ cố định.</div>'}
     </section>
 
@@ -377,9 +437,13 @@
         <p class="sub">Mặc định ${vnd(cfg.guestFee)}/buổi. Tiền thu được sẽ hoàn lại cho người cố định vào cuối tháng.</p></div>
         <button class="btn btn-sm" data-act="add-guest">+ Thêm lượt</button></div>
       ${guests.length ? `<div class="table-wrap"><table>
-        <thead><tr><th>Ngày</th><th>Người đánh</th><th class="num">Số tiền</th><th>Đã trả</th><th>Ghi chú</th><th></th></tr></thead>
-        <tbody>${guests.sort((a, b) => a.date.localeCompare(b.date)).map((g) => `<tr>
+        <thead><tr><th>Ngày</th><th>Nhóm</th><th>Người đánh</th><th class="num">Số tiền</th><th>Đã trả</th><th>Ghi chú</th><th></th></tr></thead>
+        <tbody>${guests.slice().sort((a, b) => a.date.localeCompare(b.date)).map((g) => {
+          const s = sessions.find((x) => guestBelongs(g, x));
+          return `<tr>
           <td>${dayLabel(g.date)}</td>
+          <td>${s ? `<span class="badge badge-accent">${esc(s.group)}</span>`
+                  : '<span class="badge badge-danger">?</span>'}</td>
           <td>${esc(g.memberId ? memberName(g.memberId) : g.name)}${g.memberId ? '' : ' <span class="badge badge-muted">khách</span>'}</td>
           <td class="num">${vnd(g.amount)}</td>
           <td>${g.memberId ? '<span class="muted small">tính vào công nợ</span>'
@@ -388,9 +452,16 @@
           <td class="row-actions">
             ${g.memberId ? '' : `<button class="btn btn-sm btn-ghost" data-act="toggle-guest-paid" data-id="${esc(g.id)}">↔</button>`}
             <button class="btn btn-sm btn-danger" data-act="del-guest" data-id="${esc(g.id)}">Xoá</button></td>
-        </tr>`).join('')}</tbody></table></div>`
+        </tr>`; }).join('')}</tbody></table></div>`
         : '<div class="empty">Chưa có ai đánh vãng lai tháng này.</div>'}
-      ${orphan.length ? `<div class="note" style="margin-top:14px">Có ${orphan.length} lượt vãng lai ghi vào ngày không có buổi đánh nào. Kiểm tra lại ngày tháng nhé.</div>` : ''}
+      ${r.orphanGuests.length ? `<div class="note" style="margin-top:14px">Có ${r.orphanGuests.length} lượt
+        vãng lai ghi vào ngày không có buổi đánh nào, nên tiền chưa hoàn cho nhóm nào. Kiểm tra lại ngày tháng nhé.</div>` : ''}
+      ${r.ambiguousGuests.length ? `<div class="note" style="margin-top:14px">Có ${r.ambiguousGuests.length}
+        lượt vãng lai vào ngày có nhiều nhóm cùng đánh, chưa rõ thuộc nhóm nào nên tiền chưa được hoàn.
+        Hãy xoá rồi thêm lại bằng nút <b>+ Vãng lai</b> ở đúng dòng buổi.</div>` : ''}
+      ${dupDays.length ? `<div class="note" style="margin-top:14px">Ngày ${dupDays.map(dayLabel).join(', ')}
+        có nhiều nhóm cùng đánh. Khi thêm vãng lai, nhớ bấm nút <b>+ Vãng lai</b> ngay trên dòng buổi
+        để tiền vào đúng nhóm.</div>` : ''}
     </section>`;
   }
 
@@ -406,7 +477,9 @@
     return `<section class="card">
       <div class="card-head">
         <div><h2>Tiền cầu ${Calc.fmtMonthVi(S.month)}</h2>
-          <p class="sub">Tổng ${vnd(total)}${r.fixedCount ? ` · chia đều ${r.fixedCount} người cố định → ${vnd(r.shuttleShare)}/người` : ''}</p></div>
+          <p class="sub">Tổng ${vnd(total)}${r.totalRegisteredSessions
+            ? ` · chia theo số buổi đăng ký (${r.totalRegisteredSessions} lượt) → ${vnd(total / r.totalRegisteredSessions)}/buổi/người`
+            : ''}</p></div>
         <button class="btn btn-sm btn-primary" data-act="add-shuttle">+ Ghi lần mua cầu</button>
       </div>
       ${rows.length ? `<div class="table-wrap"><table>
@@ -426,7 +499,8 @@
         <tfoot><tr><td colspan="4">Tổng</td><td class="num">${vnd(total)}</td><td colspan="2"></td></tr></tfoot>
       </table></div>
       <div class="note info" style="margin-top:14px">Người đứng ra mua cầu được <b>trừ thẳng</b> số tiền đã ứng
-      vào khoản phải đóng, nên không cần hoàn tiền mặt riêng.</div>`
+      vào khoản phải đóng, nên không cần hoàn tiền mặt riêng.<br>
+      Tiền cầu chia theo số buổi đăng ký trong tháng: ai đánh 2 buổi/tuần gánh gấp đôi ai đánh 1 buổi/tuần.</div>`
       : '<div class="empty">Tháng này chưa mua cầu.</div>'}
     </section>`;
   }
@@ -436,29 +510,58 @@
    * ===================================================================*/
   function pageRegister() {
     const cfg = monthCfg();
-    const fixedIds = S.db.fixed.filter((f) => f.month === S.month).map((f) => f.memberId);
-    const prevIds = S.db.fixed.filter((f) => f.month === Calc.prevMonth(S.month)).map((f) => f.memberId);
-    const actives = S.db.members.filter((m) => m.active);
     const r = rep();
+    const groups = r.groupNames;
+    const actives = S.db.members.filter((m) => m.active);
+    const prevHas = S.db.fixed.some((f) => f.month === Calc.prevMonth(S.month));
+
+    const regs = new Map(r.rows.filter((x) => x.isFixed).map((x) => [x.memberId, new Set(x.groups)]));
+    const has = (id, g) => regs.has(id) && regs.get(id).has(g);
+
+    const body = !groups.length
+      ? `<div class="empty">Chưa có buổi đánh nào trong tháng, nên chưa biết có những nhóm nào.<br>
+         Sang tab <b>Buổi đánh</b> → <b>Tạo nhanh cả tháng</b> trước đã.</div>`
+      : !actives.length
+      ? '<div class="empty">Chưa có thành viên nào. Sang tab <b>Thành viên</b> để thêm.</div>'
+      : `<div class="table-wrap"><table>
+          <thead><tr><th>Thành viên</th>
+            ${groups.map((g) => `<th style="text-align:center">${esc(g)}<br>
+              <span class="muted small" style="font-weight:400">${(r.groups.find((x) => x.name === g) || {}).sessionCount || 0} buổi</span></th>`).join('')}
+            <th class="num">Buổi/tháng</th><th class="num">Tiền sân</th></tr></thead>
+          <tbody>${actives.map((m) => {
+            const row = r.rows.find((x) => x.memberId === m.id);
+            return `<tr>
+              <td><b>${esc(m.name)}</b></td>
+              ${groups.map((g) => `<td style="text-align:center">
+                <input type="checkbox" style="width:auto;accent-color:var(--accent);transform:scale(1.25)"
+                  data-act="toggle-fixed" data-id="${esc(m.id)}" data-group="${esc(g)}"
+                  ${has(m.id, g) ? 'checked' : ''} aria-label="${esc(m.name)} – ${esc(g)}"></td>`).join('')}
+              <td class="num muted">${row && row.registeredSessions ? row.registeredSessions : '–'}</td>
+              <td class="num">${row && row.courtShare ? vnd(row.courtShare - row.guestCredit) : '–'}</td>
+            </tr>`;
+          }).join('')}</tbody>
+          <tfoot><tr><td>Số người</td>
+            ${groups.map((g) => {
+              const gg = r.groups.find((x) => x.name === g) || { memberCount: 0 };
+              return `<td class="num" style="text-align:center">${gg.memberCount}</td>`;
+            }).join('')}
+            <td class="num">${r.totalRegisteredSessions}</td><td></td></tr></tfoot>
+        </table></div>`;
 
     return `<section class="card">
       <div class="card-head">
         <div><h2>Đăng ký cố định ${Calc.fmtMonthVi(S.month)}</h2>
-          <p class="sub">Tick tên những người đăng ký cả tháng. ${fixedIds.length} người đã đăng ký.</p></div>
+          <p class="sub">Tick từng buổi trong tuần. Ai đánh cả hai thì tick cả hai — tiền sân sẽ cộng lại.</p></div>
         <div class="toolbar">
-          ${prevIds.length ? '<button class="btn btn-sm" data-act="copy-prev-fixed">Chép từ tháng trước</button>' : ''}
+          ${prevHas ? '<button class="btn btn-sm" data-act="copy-prev-fixed">Chép từ tháng trước</button>' : ''}
           <button class="btn btn-sm btn-ghost" data-act="clear-fixed">Bỏ chọn hết</button>
         </div>
       </div>
-      ${actives.length ? `<div class="checks">${actives.map((m) => `
-        <label class="check${fixedIds.includes(m.id) ? ' on' : ''}">
-          <input type="checkbox" data-act="toggle-fixed" data-id="${esc(m.id)}" ${fixedIds.includes(m.id) ? 'checked' : ''}>
-          <span>${esc(m.name)}</span>
-        </label>`).join('')}</div>`
-        : '<div class="empty">Chưa có thành viên nào. Sang tab <b>Thành viên</b> để thêm.</div>'}
-      ${r.fixedCount ? `<div class="note info" style="margin-top:16px">
-        Với ${r.sessionCount} buổi × ${vnd(cfg.courtFee)}, mỗi người cố định gánh
-        <b>${vnd(r.courtShare)}</b> tiền sân trong tháng.</div>` : ''}
+      ${body}
+      ${groups.length ? `<div class="note info" style="margin-top:16px">
+        Tiền sân mỗi nhóm chia riêng: ${r.groups.map((g) =>
+          `<b>${esc(g.name)}</b> ${vnd(g.courtTotal)} ÷ ${g.memberCount || 0} người`).join(' · ')}.
+        Tiền cầu chia theo số buổi đăng ký, nên người đánh 2 buổi/tuần gánh gấp đôi người đánh 1 buổi.</div>` : ''}
     </section>
 
     <section class="card">
@@ -598,18 +701,20 @@
     if (!el || !FOCUSABLE[el.tagName]) return null;
     if (!el.dataset || !el.dataset.act || !$('#main').contains(el)) return null;
     const id = el.dataset.id || el.dataset.i || '';
+    const group = el.dataset.group || '';
     // id lạ (chứa dấu nháy) sẽ làm vỡ selector -> bỏ qua cho an toàn
-    if (/["'\\]/.test(id) || /["'\\]/.test(el.dataset.act)) return null;
+    if (/["'\\]/.test(id) || /["'\\]/.test(group) || /["'\\]/.test(el.dataset.act)) return null;
     let start = null, end = null;
     try { start = el.selectionStart; end = el.selectionEnd; } catch (e) { /* input number */ }
-    return { act: el.dataset.act, id, start, end, scroll: window.scrollY };
+    return { act: el.dataset.act, id, group, start, end, scroll: window.scrollY };
   }
 
   function restoreFocus(k) {
     if (!k) return;
     let el = null;
     try {
-      const base = `#main [data-act="${k.act}"]`;
+      let base = `#main [data-act="${k.act}"]`;
+      if (k.group) base += `[data-group="${k.group}"]`;
       el = k.id
         ? ($(`${base}[data-id="${k.id}"]`) || $(`${base}[data-i="${k.id}"]`))
         : $(base);
@@ -711,20 +816,40 @@
 
     /* ---- đăng ký cố định ---- */
     'toggle-fixed'(el) {
-      const id = el.dataset.id, on = el.checked;
+      const id = el.dataset.id, group = el.dataset.group, on = el.checked;
+      const groups = Calc.monthGroups(S.db, S.month);
       mutate((db) => {
-        db.fixed = db.fixed.filter((f) => !(f.month === S.month && f.memberId === id));
-        if (on) db.fixed.push({ month: S.month, memberId: id });
+        // Bung bản ghi "cả tháng" (*) thành từng nhóm cụ thể trước khi sửa
+        const mine = db.fixed.filter((f) => f.month === S.month && f.memberId === id);
+        let set = new Set();
+        mine.forEach((f) => {
+          if (!f.group || f.group === Calc.ALL) groups.forEach((g) => set.add(g));
+          else set.add(f.group);
+        });
+        if (on) set.add(group); else set.delete(group);
+        db.fixed = db.fixed.filter((f) => !(f.month === S.month && f.memberId === id))
+          .concat(Array.from(set).map((g) => ({ month: S.month, memberId: id, group: g })));
       });
     },
     'copy-prev-fixed'() {
       const prev = Calc.prevMonth(S.month);
+      const prevGroups = Calc.monthGroups(S.db, prev);
+      const curGroups = Calc.monthGroups(S.db, S.month);
       mutate((db) => {
-        const ids = db.fixed.filter((f) => f.month === prev).map((f) => f.memberId);
-        db.fixed = db.fixed.filter((f) => f.month !== S.month)
-          .concat(ids.map((memberId) => ({ month: S.month, memberId })));
+        const rows = [];
+        db.fixed.filter((f) => f.month === prev).forEach((f) => {
+          const targets = (!f.group || f.group === Calc.ALL) ? prevGroups : [f.group];
+          targets.forEach((g) => {
+            if (curGroups.indexOf(g) === -1) return;   // tháng này không có nhóm đó
+            rows.push({ month: S.month, memberId: f.memberId, group: g });
+          });
+        });
+        db.fixed = db.fixed.filter((f) => f.month !== S.month).concat(rows);
       });
-      toast('Đã chép danh sách từ ' + Calc.fmtMonthVi(prev));
+      const missing = prevGroups.filter((g) => curGroups.indexOf(g) === -1);
+      toast(missing.length
+        ? `Đã chép từ ${Calc.fmtMonthVi(prev)} (bỏ qua nhóm ${missing.join(', ')} vì tháng này không có)`
+        : 'Đã chép danh sách từ ' + Calc.fmtMonthVi(prev));
     },
     'clear-fixed'() {
       if (!confirm('Bỏ chọn toàn bộ người cố định tháng này?')) return;
@@ -756,25 +881,32 @@
           const days = DOW.map((_, i) => i).filter((i) => d['d' + i]);
           if (!days.length) throw new Error('Chưa chọn thứ nào.');
           const dates = Calc.generateDates(S.month, days);
+          let added = 0;
           mutate((db) => {
             db.settings.defaultWeekdays = days;
             dates.forEach((date) => {
               if (db.sessions.some((s) => s.date === date)) return;
-              db.sessions.push({ id: uid(), month: S.month, date, cost: null, note: '' });
+              db.sessions.push({
+                id: uid(), month: S.month, date,
+                group: Calc.defaultGroup(date), cost: null, note: '',
+              });
+              added++;
             });
           });
-          toast(`Đã tạo lịch ${dates.length} buổi`);
+          toast(`Đã tạo ${added} buổi (${days.map((i) => DOW[i]).join(', ')})`);
         }, 'Tạo');
     },
     'add-session'() {
       modal('Thêm buổi đánh',
         fld('date', 'Ngày', 'date', S.month + '-01', 'required') +
+        groupField('') +
         fld('cost', 'Tiền sân (để trống = giá mặc định)', 'number', '', 'step="any"') +
         fld('note', 'Ghi chú', 'text', ''),
         (d) => {
           if (!d.date) throw new Error('Chưa chọn ngày.');
           mutate((db) => db.sessions.push({
             id: uid(), month: Calc.monthKeyOf(d.date), date: d.date,
+            group: (d.group || '').trim() || Calc.defaultGroup(d.date),
             cost: d.cost === '' ? null : Calc.num(d.cost), note: d.note,
           }));
         });
@@ -782,37 +914,63 @@
     'edit-session'(el) {
       const s = S.db.sessions.find((x) => x.id === el.dataset.id);
       modal('Sửa buổi đánh',
-        fld('date', 'Ngày', 'date', s.date) +
+        fld('date', 'Ngày', 'date', s.date, 'required') +
+        groupField(s.group) +
         fld('cost', 'Tiền sân (để trống = giá mặc định)', 'number', s.cost == null ? '' : s.cost, 'step="any"') +
         fld('note', 'Ghi chú', 'text', s.note),
-        (d) => mutate(() => {
-          s.date = d.date; s.month = Calc.monthKeyOf(d.date);
-          s.cost = d.cost === '' ? null : Calc.num(d.cost); s.note = d.note;
-        }));
+        (d) => {
+          if (!d.date) throw new Error('Chưa chọn ngày.');
+          const moving = S.db.guests.filter((g) => guestBelongs(g, s));
+          mutate(() => {
+            s.date = d.date; s.month = Calc.monthKeyOf(d.date);
+            s.group = (d.group || '').trim() || Calc.defaultGroup(d.date);
+            s.cost = d.cost === '' ? null : Calc.num(d.cost); s.note = d.note;
+            // Kéo các lượt vãng lai của buổi đi theo, kẻo chúng thành mồ côi
+            moving.forEach((g) => { g.sessionId = s.id; g.date = s.date; g.month = s.month; });
+          });
+        });
     },
     'del-session'(el) {
       const id = el.dataset.id;
-      if (!confirm('Xoá buổi đánh này?')) return;
-      mutate((db) => { db.sessions = db.sessions.filter((s) => s.id !== id); });
+      const s = S.db.sessions.find((x) => x.id === id);
+      if (!s) return;
+      // Chỉ xoá lượt vãng lai nào không còn thuộc buổi nào khác
+      // (hai sân cùng ngày cùng nhóm thì khách vẫn còn chỗ để bám vào).
+      const gs = S.db.guests.filter((g) => guestBelongs(g, s)
+        && !S.db.sessions.some((x) => x.id !== id && guestBelongs(g, x)));
+      if (!confirm(gs.length
+        ? `Xoá buổi ${dayLabel(s.date)} (nhóm ${s.group})?\n` +
+          `${gs.length} lượt vãng lai của buổi này sẽ bị xoá theo.`
+        : `Xoá buổi ${dayLabel(s.date)} (nhóm ${s.group})?`)) return;
+      const doomed = new Set(gs.map((g) => g.id));
+      mutate((db) => {
+        db.sessions = db.sessions.filter((x) => x.id !== id);
+        db.guests = db.guests.filter((g) => !doomed.has(g.id));
+      });
     },
 
     /* ---- vãng lai ---- */
     'add-guest'(el) {
       const cfg = monthCfg();
-      const dates = S.db.sessions.filter((s) => s.month === S.month)
-        .sort((a, b) => a.date.localeCompare(b.date))
-        .map((s) => ({ v: s.date, t: dayLabel(s.date) }));
-      if (!dates.length) { toast('Hãy tạo buổi đánh trước đã.', true); return; }
+      const list = S.db.sessions.filter((s) => s.month === S.month)
+        .sort((a, b) => a.date.localeCompare(b.date));
+      if (!list.length) { toast('Hãy tạo buổi đánh trước đã.', true); return; }
+      const opts = list.map((s) => ({ v: s.id, t: `${dayLabel(s.date)} · nhóm ${s.group}` }));
+      const preset = el.dataset.session
+        || (el.dataset.date && (list.find((s) => s.date === el.dataset.date) || {}).id)
+        || opts[0].v;
       modal('Thêm lượt đánh vãng lai',
-        sel('date', 'Buổi', dates, el.dataset.date || dates[0].v) +
+        sel('sessionId', 'Buổi', opts, preset) +
         sel('memberId', 'Là thành viên CLB?', memberOptions('— Khách ngoài, thu tiền mặt —'), '') +
         fld('name', 'Tên (nếu là khách ngoài)', 'text', '') +
         fld('amount', 'Số tiền (đ)', 'number', cfg.guestFee, 'step="any"') +
         `<label class="check"><input type="checkbox" name="paid"><span>Khách ngoài đã trả tiền</span></label>`,
         (d) => {
           if (!d.memberId && !d.name.trim()) throw new Error('Nhập tên khách hoặc chọn thành viên.');
+          const s = list.find((x) => x.id === d.sessionId);
+          if (!s) throw new Error('Chưa chọn buổi.');
           mutate((db) => db.guests.push({
-            id: uid(), month: Calc.monthKeyOf(d.date), date: d.date,
+            id: uid(), month: s.month, sessionId: s.id, date: s.date,
             name: d.memberId ? '' : d.name.trim(), memberId: d.memberId,
             amount: Calc.num(d.amount), paid: !!d.paid, note: '',
           }));
@@ -831,12 +989,13 @@
     /* ---- tiền cầu ---- */
     'add-shuttle'() {
       modal('Ghi nhận mua cầu',
-        fld('date', 'Ngày mua', 'date', new Date().toISOString().slice(0, 10)) +
+        fld('date', 'Ngày mua', 'date', new Date().toISOString().slice(0, 10), 'required') +
         sel('buyerId', 'Người ứng tiền mua', memberOptions('— Trả bằng quỹ CLB —'), '') +
         `<div class="grid2">${fld('tubes', 'Số ống', 'number', 1, 'step="any"')}${fld('unitPrice', 'Đơn giá / ống (đ)', 'number', '', 'step="any"')}</div>` +
         fld('amount', 'Thành tiền (để trống = số ống × đơn giá)', 'number', '', 'step="any"') +
         fld('note', 'Ghi chú', 'text', ''),
         (d) => {
+          if (!d.date) throw new Error('Chưa chọn ngày mua.');
           const amount = d.amount !== '' ? Calc.num(d.amount) : Calc.num(d.tubes) * Calc.num(d.unitPrice);
           if (!amount) throw new Error('Chưa có số tiền.');
           mutate((db) => db.shuttles.push({
@@ -848,12 +1007,13 @@
     'edit-shuttle'(el) {
       const s = S.db.shuttles.find((x) => x.id === el.dataset.id);
       modal('Sửa lần mua cầu',
-        fld('date', 'Ngày mua', 'date', s.date) +
+        fld('date', 'Ngày mua', 'date', s.date, 'required') +
         sel('buyerId', 'Người ứng tiền mua', memberOptions('— Trả bằng quỹ CLB —'), s.buyerId) +
         `<div class="grid2">${fld('tubes', 'Số ống', 'number', s.tubes, 'step="any"')}${fld('unitPrice', 'Đơn giá / ống (đ)', 'number', s.unitPrice, 'step="any"')}</div>` +
         fld('amount', 'Thành tiền', 'number', s.amount, 'step="any"') +
         fld('note', 'Ghi chú', 'text', s.note),
         (d) => mutate(() => {
+          if (!d.date) throw new Error('Chưa chọn ngày mua.');
           s.date = d.date; s.month = Calc.monthKeyOf(d.date); s.buyerId = d.buyerId;
           s.tubes = Calc.num(d.tubes); s.unitPrice = Calc.num(d.unitPrice);
           s.amount = d.amount !== '' ? Calc.num(d.amount) : Calc.num(d.tubes) * Calc.num(d.unitPrice);
@@ -923,11 +1083,12 @@
     },
     'export-csv'() {
       const r = rep();
-      const head = ['Thành viên', 'Cố định', 'Nợ/dư cũ', 'Tiền sân', 'Tiền cầu', 'Hoàn vãng lai',
-        'Cầu đã mua', 'Phí vãng lai', 'Cần đóng', 'Đã đóng', 'Còn lại'];
+      const head = ['Thành viên', 'Buổi đăng ký', 'Số buổi/tháng', 'Nợ/dư cũ', 'Tiền sân', 'Tiền cầu',
+        'Hoàn vãng lai', 'Cầu đã mua', 'Phí vãng lai', 'Cần đóng', 'Đã đóng', 'Còn lại'];
       const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
       const lines = [head.join(',')].concat(r.rows.map((x) => [
-        q(x.name), x.isFixed ? 'x' : '', x.opening, x.courtShare, x.shuttleShare,
+        q(x.name), q(x.groups.join('+')), x.registeredSessions,
+        x.opening, x.courtShare, x.shuttleShare,
         -x.guestCredit, -x.shuttleAdvance, x.guestFee, x.due, x.paid, x.closing,
       ].join(',')));
       download(`cau-long-${S.month}.csv`, '﻿' + lines.join('\n'), 'text/csv;charset=utf-8');

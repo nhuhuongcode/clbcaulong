@@ -7,25 +7,48 @@ Chạy hoàn toàn trên GitHub Pages (web tĩnh), dữ liệu lưu trong **Goog
 
 ## Cách tính tiền
 
+### Nhóm buổi
+
+CLB đánh 2 buổi mỗi tuần, ví dụ **thứ 3** và **thứ 5**. Mỗi buổi thuộc về một *nhóm*
+(mặc định lấy theo thứ trong tuần: `T3`, `T5`). Thành viên đăng ký cố định **theo từng nhóm**:
+
+- chỉ đăng ký T3,
+- chỉ đăng ký T5,
+- hoặc cả hai.
+
+Tiền sân của mỗi nhóm được chia riêng cho người đăng ký nhóm đó. Ai đăng ký cả hai thì cộng hai phần lại.
+
 | Khoản | Ai chịu | Công thức |
 |---|---|---|
-| Tiền sân | Người **cố định** | `tổng tiền sân tháng ÷ số người cố định` |
+| Tiền sân | Người cố định **của từng nhóm** | `tổng tiền sân của nhóm ÷ số người cố định của nhóm đó` |
 | Phí vãng lai | Người **vãng lai** | `giá cố định × số buổi tham gia` (mặc định 50.000đ/buổi) |
-| Hoàn vãng lai | Người **cố định** được hoàn | `tổng thu vãng lai ÷ số người cố định` |
-| Tiền cầu | Người **cố định** | `tổng tiền cầu ÷ số người cố định` |
+| Hoàn vãng lai | Người cố định **của nhóm chứa buổi đó** | `tiền vãng lai thu ở nhóm ÷ số người cố định của nhóm` |
+| Tiền cầu | Người **cố định**, theo mức độ tham gia | `tổng tiền cầu × số buổi mình đăng ký ÷ tổng số buổi cả CLB đăng ký` |
 | Ứng mua cầu | Người đứng ra mua | trừ thẳng số tiền đã ứng |
+
+Nghĩa là: khách đánh buổi thứ 3 thì tiền đó giảm tiền sân cho **nhóm thứ 3**, và người
+đánh 2 buổi/tuần gánh **gấp đôi** tiền cầu so với người đánh 1 buổi/tuần.
 
 **Số tiền phải đóng của một người trong tháng:**
 
 ```
 Cần đóng = (nợ/dư mang sang từ tháng trước)
-         + tiền sân
-         + tiền cầu
-         − hoàn vãng lai
+         + tiền sân các nhóm đã đăng ký (cộng lại)
+         + tiền cầu theo số buổi đăng ký
+         − hoàn vãng lai của các nhóm đã đăng ký
          − tiền cầu mình đã ứng mua
-         + phí vãng lai của chính mình (nếu tháng đó không đăng ký cố định)
+         + phí vãng lai của chính mình (những buổi đánh ngoài đăng ký)
          ± điều chỉnh tay
 ```
+
+**Ví dụ.** Tháng có 5 buổi T3 và 4 buổi T5, sân 400.000đ/buổi.
+Nhóm T3 có 6 người, nhóm T5 có 4 người. An đăng ký cả hai, Bình chỉ T5.
+
+- Tiền sân T3: `5 × 400.000 ÷ 6 = 333.000đ/người`
+- Tiền sân T5: `4 × 400.000 ÷ 4 = 400.000đ/người`
+- An trả `333.000 + 400.000 = 733.000đ`; Bình trả `400.000đ`
+- Nếu tháng đó mua 600.000đ tiền cầu, tổng lượt đăng ký là `6×5 + 4×4 = 46`:
+  An (9 buổi) gánh `600.000 × 9 ÷ 46 ≈ 117.000đ`, Bình (4 buổi) gánh `≈ 52.000đ`.
 
 Sau khi trừ số đã đóng, phần còn lại tự động **mang sang tháng sau** (dương = còn nợ, âm = còn dư).
 Nhờ vậy bạn không cần "chốt sổ" thủ công cuối tháng — cứ nhập buổi đánh, vãng lai, tiền cầu,
@@ -91,8 +114,9 @@ bấm **Kiểm tra kết nối**. Thấy "Kết nối thành công 🎉" là xon
 **Cuối tháng trước** — chuẩn bị cho tháng mới:
 
 1. Chuyển sang tháng mới ở thanh chọn tháng.
-2. Tab **Đăng ký tháng** → *Chép từ tháng trước* → sửa lại ai vào/ai nghỉ.
-3. Tab **Buổi đánh** → *Tạo nhanh cả tháng* → chọn các thứ đánh cố định.
+2. Tab **Buổi đánh** → *Tạo nhanh cả tháng* → chọn các thứ đánh cố định (làm bước này trước,
+   vì phải có buổi thì app mới biết tháng có những nhóm nào).
+3. Tab **Đăng ký tháng** → *Chép từ tháng trước* → tick lại ai đánh T3, ai đánh T5, ai đánh cả hai.
 4. Tab **Bảng thu tiền** → *Sao chép tin nhắn* → dán vào nhóm Zalo.
 
 **Trong tháng:**
@@ -107,8 +131,10 @@ bấm **Kiểm tra kết nối**. Thấy "Kết nối thành công 🎉" là xon
 
 ## Mẹo
 
-- **Nghỉ buổi nào** thì xoá buổi đó trong tab *Buổi đánh* — tiền sân tự giảm.
+- **Nghỉ buổi nào** thì xoá buổi đó trong tab *Buổi đánh* — tiền sân của nhóm đó tự giảm.
 - **Buổi giá khác** (thuê thêm sân, ngày lễ) → *Sửa* buổi đó và nhập tiền sân riêng.
+- **Đá bù sang ngày khác**: sửa ngày của buổi nhưng **giữ nguyên nhóm cũ**. Ví dụ buổi T3 dời
+  sang thứ 4 thì vẫn để nhóm `T3`, để tiền vẫn chia cho đúng nhóm người đăng ký T3.
 - **Khách ngoài CLB** đánh vãng lai: chọn "— Khách ngoài, thu tiền mặt —".
   Tiền vẫn vào quỹ và hoàn cho người cố định, nhưng không tạo công nợ riêng.
 - **Điều chỉnh tay** (nút `±`) dùng cho các khoản lặt vặt: nước uống, phạt đi muộn, bù làm tròn.

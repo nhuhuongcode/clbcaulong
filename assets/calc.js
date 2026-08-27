@@ -3,21 +3,28 @@
  * Không phụ thuộc DOM -> chạy được cả trên trình duyệt lẫn Node (để test).
  * =========================================================================
  *
- * QUY TẮC TÍNH (theo thoả thuận của CLB):
- *  1. Tiền sân mỗi buổi (mặc định 400.000đ) được NGƯỜI CỐ ĐỊNH của tháng gánh,
- *     chia đều cho cả tháng:  courtShare = tổng tiền sân tháng / số người cố định.
- *  2. Người VÃNG LAI trả một mức cố định cho mỗi buổi họ tham gia (vd 50.000đ).
- *     Toàn bộ tiền vãng lai thu được trong tháng trở thành TIỀN DƯ,
- *     chia đều lại cho người cố định:  guestCredit = tổng thu vãng lai / số người cố định.
- *  3. Tiền cầu trong tháng chia đều cho người cố định:
- *     shuttleShare = tổng tiền cầu / số người cố định.
- *     Ai đứng ra mua cầu thì được trừ đúng số tiền đã ứng (shuttleAdvance).
- *  4. Số dư/nợ của tháng trước được cộng dồn sang tháng sau (opening balance).
+ * KHÁI NIỆM "NHÓM BUỔI" (group)
+ *   Mỗi buổi đánh thuộc về một nhóm, mặc định là thứ trong tuần: "T3", "T5"…
+ *   Thành viên đăng ký cố định THEO TỪNG NHÓM: có người chỉ đăng ký T3,
+ *   có người chỉ T5, có người cả hai.
  *
- *  Net tháng M của 1 người = courtShare + shuttleShare + phíVãngLaiCủaChínhHọ
- *                          - guestCredit - shuttleAdvance + điềuChỉnh
+ * QUY TẮC TÍNH
+ *  1. Tiền sân tính RIÊNG cho từng nhóm:
+ *       courtShare(nhóm) = tổng tiền sân của nhóm ÷ số người cố định của nhóm
+ *     Ai đăng ký cả 2 nhóm thì cộng cả hai phần lại.
+ *  2. Người VÃNG LAI trả một mức cố định cho mỗi buổi tham gia.
+ *     Tiền vãng lai của một buổi hoàn lại cho người cố định CỦA NHÓM buổi đó:
+ *       guestCredit(nhóm) = tổng thu vãng lai của nhóm ÷ số người cố định nhóm đó
+ *  3. Tiền cầu chia theo SỐ BUỔI ĐĂNG KÝ trong tháng (đánh nhiều thì gánh nhiều):
+ *       shuttleShare(người) = tổng tiền cầu × số buổi người đó đăng ký
+ *                             ÷ tổng số buổi đăng ký của cả CLB
+ *     Ai đứng ra mua cầu thì được trừ đúng số tiền đã ứng.
+ *  4. Số dư/nợ của tháng trước cộng dồn sang tháng sau (opening balance).
+ *
+ *  Net tháng M của 1 người = Σ courtShare(nhóm) + shuttleShare + phíVãngLaiCủaHọ
+ *                          − Σ guestCredit(nhóm) − tiềnCầuĐãỨng + điềuChỉnh
  *  Cần đóng  = openingBalance + Net
- *  Còn lại   = Cần đóng - đã thanh toán   (dương = còn nợ, âm = dư)
+ *  Còn lại   = Cần đóng − đã thanh toán   (dương = còn nợ, âm = dư)
  * ========================================================================= */
 
 (function (root, factory) {
@@ -25,6 +32,12 @@
   else root.Calc = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
+
+  /** Nhãn thứ trong tuần, 0 = Chủ nhật */
+  const DOW = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+
+  /** Giá trị group đặc biệt: đăng ký TẤT CẢ các nhóm của tháng. */
+  const ALL = '*';
 
   // ---------------------------------------------------------------- helpers
   /**
@@ -68,6 +81,19 @@
 
   const monthKeyOf = (d) => String(d || '').slice(0, 7);
 
+  /** Thứ trong tuần của một ngày ISO (0 = CN), null nếu ngày không hợp lệ. */
+  function weekdayOf(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+    if (!m) return null;
+    return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay();
+  }
+
+  /** Nhóm mặc định của một buổi = nhãn thứ trong tuần ("T3", "T5", "CN"…). */
+  function defaultGroup(iso) {
+    const d = weekdayOf(iso);
+    return d == null ? 'Khác' : DOW[d];
+  }
+
   function shiftMonth(key, delta) {
     const [y, m] = String(key).split('-').map(Number);
     const d = new Date(Date.UTC(y, m - 1 + delta, 1));
@@ -87,6 +113,16 @@
     return 'Tháng ' + Number(m) + '/' + y;
   }
 
+  /** Sắp xếp nhóm theo thứ tự thứ trong tuần, nhóm lạ xếp cuối. */
+  function sortGroups(names) {
+    const order = { T2: 1, T3: 2, T4: 3, T5: 4, T6: 5, T7: 6, CN: 7 };
+    return names.slice().sort((a, b) => {
+      const oa = order[a] || 99, ob = order[b] || 99;
+      if (oa !== ob) return oa - ob;
+      return String(a).localeCompare(String(b), 'vi');
+    });
+  }
+
   // ------------------------------------------------------------- normalise
   function emptyDb() {
     return {
@@ -96,7 +132,7 @@
         courtFeePerSession: 400000,
         guestFeePerSession: 50000,
         roundStep: 1000,
-        defaultWeekdays: [2, 5], // Thứ 3 & Thứ 6 (0=CN)
+        defaultWeekdays: [2, 4], // Thứ 3 & Thứ 5 (0 = CN)
       },
       members: [],
       months: [],
@@ -112,7 +148,7 @@
   function normalize(db) {
     const base = emptyDb();
     db = db || {};
-    const out = {
+    return {
       rev: num(db.rev),
       settings: Object.assign({}, base.settings, db.settings || {}),
       members: (db.members || []).map((m) => ({
@@ -129,17 +165,24 @@
         status: m.status === 'closed' ? 'closed' : 'open',
         note: String(m.note || ''),
       })),
-      fixed: (db.fixed || []).map((f) => ({ month: String(f.month), memberId: String(f.memberId) })),
+      // group rỗng = đăng ký tất cả các nhóm của tháng (tương thích dữ liệu cũ)
+      fixed: (db.fixed || []).map((f) => ({
+        month: String(f.month),
+        memberId: String(f.memberId),
+        group: String(f.group || ALL),
+      })),
       sessions: (db.sessions || []).map((s) => ({
         id: String(s.id),
         month: s.month ? String(s.month) : monthKeyOf(s.date),
         date: String(s.date || ''),
+        group: String(s.group || defaultGroup(s.date)),
         cost: s.cost === '' || s.cost == null ? null : num(s.cost),
         note: String(s.note || ''),
       })),
       guests: (db.guests || []).map((g) => ({
         id: String(g.id),
         month: g.month ? String(g.month) : monthKeyOf(g.date),
+        sessionId: String(g.sessionId || ''),   // buổi cụ thể, để quy đúng nhóm
         date: String(g.date || ''),
         name: String(g.name || '').trim(),
         memberId: g.memberId ? String(g.memberId) : '',
@@ -173,26 +216,18 @@
         reason: String(a.reason || ''),
       })),
     };
-    return out;
   }
 
   // ------------------------------------------------------- month discovery
   function allMonths(db) {
     const set = new Set();
-    db.months.forEach((m) => set.add(m.month));
-    db.fixed.forEach((f) => set.add(f.month));
-    db.sessions.forEach((s) => set.add(s.month));
-    db.guests.forEach((g) => set.add(g.month));
-    db.shuttles.forEach((s) => set.add(s.month));
-    db.payments.forEach((p) => set.add(p.month));
-    db.adjustments.forEach((a) => set.add(a.month));
-    set.delete('');
-    set.delete('undefined');
-    return Array.from(set).filter(Boolean).sort();
+    ['months', 'fixed', 'sessions', 'guests', 'shuttles', 'payments', 'adjustments']
+      .forEach((k) => (db[k] || []).forEach((r) => set.add(r.month)));
+    return Array.from(set).filter((m) => m && m !== 'undefined').sort();
   }
 
   function monthConfig(db, month) {
-    const row = db.months.find((m) => m.month === month) || {};
+    const row = (db.months || []).find((m) => m.month === month) || {};
     return {
       month,
       courtFee: row.courtFee != null ? row.courtFee : num(db.settings.courtFeePerSession),
@@ -200,6 +235,36 @@
       status: row.status || 'open',
       note: row.note || '',
     };
+  }
+
+  /**
+   * Danh sách nhóm buổi của một tháng — CHỈ lấy từ các buổi đánh thực có.
+   * Đăng ký vào nhóm không còn buổi nào sẽ bị bỏ qua (xem `registrations`),
+   * nhờ vậy xoá hết buổi T5 thì đăng ký T5 cũ không còn treo lại.
+   */
+  function monthGroups(db, month) {
+    const set = new Set();
+    db.sessions.filter((s) => s.month === month).forEach((s) => set.add(s.group));
+    return sortGroups(Array.from(set).filter(Boolean));
+  }
+
+  /**
+   * Bản đồ đăng ký của tháng: memberId -> Set(tên nhóm).
+   * Bản ghi có group = '*' được hiểu là đăng ký mọi nhóm của tháng.
+   */
+  function registrations(db, month, groupNames, memberById) {
+    const regs = new Map();
+    db.fixed.filter((f) => f.month === month).forEach((f) => {
+      if (memberById && !memberById.has(f.memberId)) return;
+      const targets = (!f.group || f.group === ALL) ? groupNames : [f.group];
+      targets.forEach((g) => {
+        if (groupNames.indexOf(g) === -1) return;   // nhóm không còn buổi nào
+        if (!regs.has(f.memberId)) regs.set(f.memberId, new Set());
+        regs.get(f.memberId).add(g);
+      });
+    });
+    Array.from(regs.keys()).forEach((id) => { if (!regs.get(id).size) regs.delete(id); });
+    return regs;
   }
 
   // ------------------------------------------------------------ core maths
@@ -229,28 +294,80 @@
 
     const sessions = db.sessions.filter((s) => s.month === month)
       .sort((a, b) => a.date.localeCompare(b.date));
-    const courtTotal = sessions.reduce((t, s) => t + (s.cost != null ? s.cost : cfg.courtFee), 0);
-
-    const fixedIds = Array.from(new Set(db.fixed.filter((f) => f.month === month).map((f) => f.memberId)))
-      .filter((id) => memberById.has(id));
-    const fixedCount = fixedIds.length;
-
     const guests = db.guests.filter((g) => g.month === month);
-    const guestTotal = guests.reduce((t, g) => t + g.amount, 0);
-
     const shuttles = db.shuttles.filter((s) => s.month === month);
-    const shuttleTotal = shuttles.reduce((t, s) => t + s.amount, 0);
-
     const payments = db.payments.filter((p) => p.month === month);
     const adjustments = db.adjustments.filter((a) => a.month === month);
 
-    // Đơn giá đầu người (chỉ áp cho người cố định)
-    const courtShare   = fixedCount ? roundTo(courtTotal / fixedCount, step) : 0;
-    const shuttleShare = fixedCount ? roundTo(shuttleTotal / fixedCount, step) : 0;
-    const guestCredit  = fixedCount ? roundTo(guestTotal / fixedCount, step) : 0;
+    const costOf = (s) => (s.cost != null ? s.cost : cfg.courtFee);
+    const courtTotal = sessions.reduce((t, s) => t + costOf(s), 0);
+    const guestTotal = guests.reduce((t, g) => t + g.amount, 0);
+    const shuttleTotal = shuttles.reduce((t, s) => t + s.amount, 0);
 
-    // Tập hợp mọi người xuất hiện trong tháng này
-    const ids = new Set(fixedIds);
+    // ---------------------------------------------------- nhóm & đăng ký
+    const groupNames = monthGroups(db, month);
+    const regs = registrations(db, month, groupNames, memberById);
+
+    // Quy mỗi lượt vãng lai về đúng nhóm: ưu tiên buổi đã chọn (sessionId),
+    // không có thì suy ra từ ngày. Ngày có nhiều nhóm mà không ghi sessionId
+    // thì không đoán bừa — đưa vào danh sách cần kiểm tra lại.
+    const sessionById = new Map(sessions.map((s) => [s.id, s]));
+    const groupsOfDate = new Map();
+    sessions.forEach((s) => {
+      if (!groupsOfDate.has(s.date)) groupsOfDate.set(s.date, new Set());
+      groupsOfDate.get(s.date).add(s.group);
+    });
+    const ambiguousGuests = [];
+    const guestGroup = (g) => {
+      const s = g.sessionId ? sessionById.get(g.sessionId) : null;
+      if (s) return s.group;
+      const set = groupsOfDate.get(g.date);
+      if (!set || !set.size) return null;
+      if (set.size > 1) { ambiguousGuests.push(g); return null; }
+      return set.values().next().value;
+    };
+    const groupOfGuest = new Map(guests.map((g) => [g.id, guestGroup(g)]));
+
+    const groups = groupNames.map((name) => {
+      const gSessions = sessions.filter((s) => s.group === name);
+      const gGuests = guests.filter((g) => groupOfGuest.get(g.id) === name);
+      const gCourt = gSessions.reduce((t, s) => t + costOf(s), 0);
+      const gGuestTotal = gGuests.reduce((t, g) => t + g.amount, 0);
+      const memberIds = [];
+      regs.forEach((set, id) => { if (set.has(name)) memberIds.push(id); });
+      const n = memberIds.length;
+      return {
+        name,
+        sessions: gSessions,
+        sessionCount: gSessions.length,
+        courtTotal: gCourt,
+        guests: gGuests,
+        guestTotal: gGuestTotal,
+        memberIds,
+        memberCount: n,
+        courtShare: n ? roundTo(gCourt / n, step) : 0,
+        guestCredit: n ? roundTo(gGuestTotal / n, step) : 0,
+      };
+    });
+    const groupByName = new Map(groups.map((g) => [g.name, g]));
+
+    // Lượt vãng lai không quy được về nhóm nào (ngày không có buổi đánh)
+    const orphanGuests = guests.filter((g) => groupOfGuest.get(g.id) == null
+      && ambiguousGuests.indexOf(g) === -1);
+
+    // ------------------------------------------- tiền cầu theo số buổi đăng ký
+    const weightOf = (id) => {
+      const set = regs.get(id);
+      if (!set) return 0;
+      let w = 0;
+      set.forEach((name) => { w += (groupByName.get(name) || { sessionCount: 0 }).sessionCount; });
+      return w;
+    };
+    let totalWeight = 0;
+    regs.forEach((set, id) => { totalWeight += weightOf(id); });
+
+    // ------------------------------------------------------------- các dòng
+    const ids = new Set(regs.keys());
     guests.forEach((g) => { if (g.memberId) ids.add(g.memberId); });
     shuttles.forEach((s) => { if (s.buyerId) ids.add(s.buyerId); });
     payments.forEach((p) => ids.add(p.memberId));
@@ -261,11 +378,24 @@
     ids.forEach((id) => {
       const member = memberById.get(id);
       if (!member) return;
-      const isFixed = fixedIds.indexOf(id) !== -1;
 
-      const myGuestFee = guests.filter((g) => g.memberId === id)
-        .reduce((t, g) => t + g.amount, 0);
-      const myGuestSessions = guests.filter((g) => g.memberId === id).length;
+      const set = regs.get(id);
+      const myGroups = set ? sortGroups(Array.from(set)) : [];
+      const isFixed = myGroups.length > 0;
+
+      let courtShare = 0, guestCredit = 0, mySessions = 0;
+      myGroups.forEach((name) => {
+        const g = groupByName.get(name);
+        courtShare += g.courtShare;
+        guestCredit += g.guestCredit;
+        mySessions += g.sessionCount;
+      });
+
+      const shuttleShare = (isFixed && totalWeight)
+        ? roundTo(shuttleTotal * weightOf(id) / totalWeight, step) : 0;
+
+      const myGuests = guests.filter((g) => g.memberId === id);
+      const myGuestFee = myGuests.reduce((t, g) => t + g.amount, 0);
       const myShuttleAdvance = shuttles.filter((s) => s.buyerId === id)
         .reduce((t, s) => t + s.amount, 0);
       const myAdjust = adjustments.filter((a) => a.memberId === id)
@@ -274,12 +404,10 @@
         .reduce((t, p) => t + p.amount, 0);
 
       const opening = balances.get(id) || 0;
-
-      const charge = (isFixed ? courtShare + shuttleShare : 0) + myGuestFee;
-      const credit = (isFixed ? guestCredit : 0) + myShuttleAdvance;
-      const net = charge - credit + myAdjust;
-      const due = opening + net;          // tổng phải đóng trong tháng này
-      const closing = due - myPaid;       // dương = còn nợ, âm = dư
+      const net = courtShare + shuttleShare + myGuestFee
+                - guestCredit - myShuttleAdvance + myAdjust;
+      const due = opening + net;      // tổng phải đóng trong tháng này
+      const closing = due - myPaid;   // dương = còn nợ, âm = dư
 
       balances.set(id, closing);
 
@@ -288,16 +416,14 @@
         name: member.name,
         phone: member.phone,
         isFixed,
-        courtShare: isFixed ? courtShare : 0,
-        shuttleShare: isFixed ? shuttleShare : 0,
-        guestCredit: isFixed ? guestCredit : 0,
+        groups: myGroups,
+        registeredSessions: mySessions,
+        courtShare, shuttleShare, guestCredit,
         guestFee: myGuestFee,
-        guestSessions: myGuestSessions,
+        guestSessions: myGuests.length,
         shuttleAdvance: myShuttleAdvance,
         adjust: myAdjust,
-        net,
-        opening,
-        due,
+        net, opening, due,
         paid: myPaid,
         closing,
         status: Math.abs(closing) < 1 ? 'done' : (closing > 0 ? 'owing' : 'credit'),
@@ -311,20 +437,23 @@
 
     const collected = rows.reduce((t, r) => t + r.paid, 0);
     const expected = rows.reduce((t, r) => t + r.due, 0);
+    const sum = (k) => rows.reduce((t, r) => t + r[k], 0);
 
     return {
       month, cfg,
       sessions, sessionCount: sessions.length, courtTotal,
-      fixedIds, fixedCount,
-      guests, guestTotal, guestCount: guests.length,
+      groups, groupNames,
+      fixedIds: Array.from(regs.keys()),
+      fixedCount: regs.size,
+      totalRegisteredSessions: totalWeight,
+      guests, guestTotal, guestCount: guests.length, orphanGuests, ambiguousGuests,
       shuttles, shuttleTotal,
-      courtShare, shuttleShare, guestCredit,
       rows, collected, expected,
       outstanding: expected - collected,
-      // chênh lệch do làm tròn
-      roundingDiff: (courtShare * fixedCount - courtTotal)
-                  + (shuttleShare * fixedCount - shuttleTotal)
-                  - (guestCredit * fixedCount - guestTotal),
+      // chênh lệch do làm tròn: thu của thành viên so với chi phí thực tế
+      roundingDiff: (sum('courtShare') - courtTotal)
+                  + (sum('shuttleShare') - shuttleTotal)
+                  - (sum('guestCredit') - guestTotal),
     };
   }
 
@@ -363,10 +492,15 @@
     const L = [];
     L.push(`💰 TIỀN CẦU LÔNG ${fmtMonthVi(rep.month).toUpperCase()}`);
     L.push('────────────────────');
-    L.push(`Số buổi: ${rep.sessionCount} · Tiền sân: ${fmtVND(rep.courtTotal)}`);
-    L.push(`Người cố định: ${rep.fixedCount} · Mỗi người: ${fmtVND(rep.courtShare)}`);
-    if (rep.shuttleTotal) L.push(`Tiền cầu: ${fmtVND(rep.shuttleTotal)} → ${fmtVND(rep.shuttleShare)}/người`);
-    if (rep.guestTotal) L.push(`Thu vãng lai: ${fmtVND(rep.guestTotal)} → hoàn ${fmtVND(rep.guestCredit)}/người`);
+    rep.groups.forEach((g) => {
+      L.push(`${g.name}: ${g.sessionCount} buổi × ${fmtVND(g.sessionCount ? g.courtTotal / g.sessionCount : 0)}` +
+             ` = ${fmtVND(g.courtTotal)}`);
+      L.push(`   ${g.memberCount} người cố định → ${fmtVND(g.courtShare)}/người` +
+             (g.guestTotal ? ` (đã trừ ${fmtVND(g.guestCredit)} tiền vãng lai)` : ''));
+    });
+    if (rep.shuttleTotal) {
+      L.push(`Tiền cầu: ${fmtVND(rep.shuttleTotal)} — chia theo số buổi đăng ký`);
+    }
     L.push('────────────────────');
     rep.rows.forEach((r) => {
       if (Math.abs(r.due) < 1 && Math.abs(r.paid) < 1) return;
@@ -374,6 +508,7 @@
         : r.status === 'credit' ? `💚 dư ${fmtVND(-r.closing)}`
         : (r.paid > 0 ? `⏳ còn thiếu ${fmtVND(r.closing)}` : '⏳ chưa đóng');
       const bits = [];
+      if (r.groups.length) bits.push(r.groups.join('+'));
       if (r.opening) bits.push(`${r.opening > 0 ? 'nợ cũ' : 'dư cũ'} ${fmtVND(Math.abs(r.opening))}`);
       if (r.shuttleAdvance) bits.push(`trừ cầu đã mua ${fmtVND(r.shuttleAdvance)}`);
       if (r.guestFee) bits.push(`vãng lai ${r.guestSessions} buổi`);
@@ -393,9 +528,10 @@
   }
 
   return {
-    emptyDb, normalize, allMonths, monthConfig,
+    ALL, DOW,
+    emptyDb, normalize, allMonths, monthConfig, monthGroups, registrations,
     computeSeries, computeMonth, report,
-    generateDates, buildMessage,
+    generateDates, buildMessage, sortGroups, defaultGroup, weekdayOf,
     fmtVND, fmtMonthVi, monthKeyOf, prevMonth, nextMonth, shiftMonth, roundTo, num,
   };
 });

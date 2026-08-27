@@ -24,9 +24,9 @@ var SHEETS = {
   Settings:    ['key', 'value'],
   Members:     ['id', 'name', 'phone', 'active', 'note'],
   Months:      ['month', 'courtFee', 'guestFee', 'status', 'note'],
-  Fixed:       ['month', 'memberId'],
-  Sessions:    ['id', 'month', 'date', 'cost', 'note'],
-  Guests:      ['id', 'month', 'date', 'name', 'memberId', 'amount', 'paid', 'note'],
+  Fixed:       ['month', 'memberId', 'group'],
+  Sessions:    ['id', 'month', 'date', 'group', 'cost', 'note'],
+  Guests:      ['id', 'month', 'sessionId', 'date', 'name', 'memberId', 'amount', 'paid', 'note'],
   Shuttles:    ['id', 'month', 'date', 'buyerId', 'tubes', 'unitPrice', 'amount', 'note'],
   Payments:    ['id', 'month', 'memberId', 'amount', 'date', 'note'],
   Adjustments: ['id', 'month', 'memberId', 'amount', 'reason']
@@ -101,11 +101,28 @@ function readAll() {
     var sh = ss.getSheetByName(name);
     var rows = [];
     if (sh && sh.getLastRow() > 1) {
-      var values = sh.getRange(2, 1, sh.getLastRow() - 1, head.length).getValues();
-      values.forEach(function (r) {
+      // Đọc theo TÊN cột ở dòng tiêu đề, không theo vị trí. Nhờ vậy sheet tạo
+      // từ phiên bản cũ (thiếu cột mới) vẫn đọc đúng, cột thiếu trả về rỗng.
+      var ncol = Math.min(Math.max(head.length, sh.getLastColumn()), sh.getMaxColumns());
+      var all = sh.getRange(1, 1, sh.getLastRow(), ncol).getValues();
+      var actual = all[0].map(function (h) { return String(h == null ? '' : h).trim(); });
+
+      // Chỉ tin dòng tiêu đề khi đủ nhiều tên khớp; nếu chỉ trùng một hai chữ
+      // (người dùng đã đổi tên cột) thì đọc theo vị trí cho an toàn.
+      var found = head.filter(function (k) { return actual.indexOf(k) !== -1; }).length;
+      var byName = found >= Math.max(2, Math.ceil(head.length / 2));
+
+      // byName: cột không có trong tiêu đề -> -1 -> trả rỗng (sheet phiên bản cũ
+      // thiếu cột mới). Ngược lại đọc thuần theo vị trí.
+      var idx = {};
+      head.forEach(function (k, i) { idx[k] = byName ? actual.indexOf(k) : i; });
+
+      all.slice(1).forEach(function (r) {
         if (r.every(function (c) { return c === '' || c === null; })) return;
         var o = {};
-        head.forEach(function (k, i) { o[k] = cell(r[i]); });
+        head.forEach(function (k) {
+          o[k] = (idx[k] >= 0 && idx[k] < r.length) ? cell(r[idx[k]]) : '';
+        });
         rows.push(o);
       });
     }
@@ -158,6 +175,13 @@ function saveAll(data, baseRev) {
     Object.keys(SHEETS).forEach(function (name) {
       var head = SHEETS[name];
       var sh = ss.getSheetByName(name) || ss.insertSheet(name);
+      if (sh.getMaxColumns() < head.length) {
+        sh.insertColumnsAfter(sh.getMaxColumns(), head.length - sh.getMaxColumns());
+      }
+      // Dọn ô tiêu đề thừa của phiên bản cũ rồi mới ghi tiêu đề chuẩn
+      if (sh.getLastColumn() > head.length) {
+        sh.getRange(1, head.length + 1, 1, sh.getLastColumn() - head.length).clearContent();
+      }
       sh.getRange(1, 1, 1, head.length).setValues([head])
         .setFontWeight('bold').setBackground('#e8f0fe');
       sh.setFrozenRows(1);
@@ -182,6 +206,9 @@ function saveAll(data, baseRev) {
         sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).clearContent();
       }
       if (rows.length) {
+        if (sh.getMaxRows() < rows.length + 1) {
+          sh.insertRowsAfter(sh.getMaxRows(), rows.length + 1 - sh.getMaxRows());
+        }
         sh.getRange(2, 1, rows.length, head.length).setValues(rows);
       }
       sh.autoResizeColumns(1, head.length);
