@@ -64,9 +64,23 @@ body{
 main{max-width:1120px; margin:0 auto; padding:18px 16px 80px}
 
 /* ----------------------------------------------------------------- cards */
+/* tăng padding + min-height cho card, đảm bảo không bị ẩn nội dung */
 .card{
-  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
-  box-shadow:var(--shadow); padding:16px; margin-bottom:16px;
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow);
+  padding:24px;        /* tăng từ 16px -> 24px */
+  margin-bottom:20px;  /* hơi lớn hơn để tạo khoảng cách */
+  min-height:160px;    /* đảm bảo cao tối thiểu */
+  overflow:visible;    /* phòng khi có phần tử popover/expand */
+}
+
+/* nếu bảng trong card bị tràn ngang: cho phép xuống dòng thay vì nowrap */
+.card .table-wrap table th,
+.card .table-wrap table td {
+  white-space:normal;
+  word-break:break-word;
 }
 .card > h2{margin:0 0 4px; font-size:16px; letter-spacing:-.01em}
 .card > .sub{margin:0 0 14px; color:var(--muted); font-size:13px}
