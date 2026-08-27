@@ -12,6 +12,112 @@
   const vnd = Calc.fmtVND;
   const DOW = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 
+  /**
+   * Ngân hàng hỗ trợ chuyển khoản qua VietQR (mã BIN theo chuẩn Napas).
+   * Lấy từ https://api.vietqr.io/v2/banks, chỉ giữ ngân hàng có isTransfer=1.
+   */
+  const BANKS = [
+    { bin: '970425', code: 'ABB', name: 'ABBANK' },
+    { bin: '970416', code: 'ACB', name: 'ACB' },
+    { bin: '970405', code: 'VBA', name: 'Agribank' },
+    { bin: '970409', code: 'BAB', name: 'BacABank' },
+    { bin: '970438', code: 'BVB', name: 'BaoVietBank' },
+    { bin: '970418', code: 'BIDV', name: 'BIDV' },
+    { bin: '546034', code: 'CAKE', name: 'CAKE' },
+    { bin: '422589', code: 'CIMB', name: 'CIMB' },
+    { bin: '970446', code: 'COOPBANK', name: 'COOPBANK' },
+    { bin: '970431', code: 'EIB', name: 'Eximbank' },
+    { bin: '970437', code: 'HDB', name: 'HDBank' },
+    { bin: '970452', code: 'KLB', name: 'KienLongBank' },
+    { bin: '668888', code: 'KBank', name: 'KBank' },
+    { bin: '970449', code: 'LPB', name: 'LPBank (LienVietPostBank)' },
+    { bin: '970422', code: 'MB', name: 'MBBank' },
+    { bin: '970414', code: 'MBV', name: 'MBV' },
+    { bin: '971025', code: 'momo', name: 'MoMo' },
+    { bin: '970426', code: 'MSB', name: 'MSB' },
+    { bin: '970428', code: 'NAB', name: 'NamABank' },
+    { bin: '970419', code: 'NCB', name: 'NCB' },
+    { bin: '970448', code: 'OCB', name: 'OCB' },
+    { bin: '970430', code: 'PGB', name: 'PGBank' },
+    { bin: '970412', code: 'PVCB', name: 'PVcomBank' },
+    { bin: '971133', code: 'PVDB', name: 'PVcomBank Pay' },
+    { bin: '970403', code: 'STB', name: 'Sacombank' },
+    { bin: '970400', code: 'SGICB', name: 'SaigonBank' },
+    { bin: '970429', code: 'SCB', name: 'SCB' },
+    { bin: '970440', code: 'SEAB', name: 'SeABank' },
+    { bin: '970443', code: 'SHB', name: 'SHB' },
+    { bin: '970424', code: 'SHBVN', name: 'ShinhanBank' },
+    { bin: '970407', code: 'TCB', name: 'Techcombank' },
+    { bin: '963388', code: 'TIMO', name: 'Timo' },
+    { bin: '970423', code: 'TPB', name: 'TPBank' },
+    { bin: '546035', code: 'Ubank', name: 'Ubank' },
+    { bin: '970427', code: 'VAB', name: 'VietABank' },
+    { bin: '970436', code: 'VCB', name: 'Vietcombank' },
+    { bin: '970454', code: 'VCCB', name: 'VietCapitalBank (BVBank)' },
+    { bin: '970433', code: 'VIETBANK', name: 'VietBank' },
+    { bin: '970415', code: 'ICB', name: 'VietinBank' },
+    { bin: '970441', code: 'VIB', name: 'VIB' },
+    { bin: '970432', code: 'VPB', name: 'VPBank' },
+    { bin: '970457', code: 'WVN', name: 'Woori' },
+  ];
+
+  /** Bỏ dấu tiếng Việt — nội dung chuyển khoản không dấu để tương thích mọi ngân hàng. */
+  function stripDiacritics(str) {
+    return String(str || '')
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '') // các dấu thanh/nguyên âm ghép rời ra sau NFD
+      .replace(/đ/g, 'd').replace(/Đ/g, 'D');
+  }
+  /** Thay {ten}, {thang}, {nam}, {club} trong mẫu nội dung chuyển khoản. */
+  function renderQrTemplate(tpl, vars) {
+    return String(tpl || '').replace(/\{(\w+)\}/g, (m, k) => (vars[k] != null ? String(vars[k]) : ''));
+  }
+  function slugify(s) {
+    return (stripDiacritics(String(s || '')).replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '')) || 'qr';
+  }
+  /** Tải ảnh cho phép đọc pixel qua canvas — nếu server không cho CORS thì sẽ reject. */
+  function loadImageCors(url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('load-failed'));
+      img.src = url;
+    });
+  }
+  /** Ghép ảnh QR + vài dòng thông tin thành một ảnh PNG duy nhất. */
+  function buildQrCard(img, lines) {
+    const pad = 28, lineH = 26, gap = 16;
+    const w = Math.max(img.width + pad * 2, 420);
+    const h = pad + img.height + gap + lines.length * lineH + pad;
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, (w - img.width) / 2, pad);
+    ctx.fillStyle = '#16181d';
+    ctx.textAlign = 'center';
+    let y = pad + img.height + gap + 18;
+    lines.forEach((line, i) => {
+      ctx.font = i === 0 ? '700 19px -apple-system, sans-serif' : '400 15px -apple-system, sans-serif';
+      ctx.fillText(line, w / 2, y);
+      y += lineH;
+    });
+    return canvas;
+  }
+  function canvasToBlob(canvas) {
+    return new Promise((resolve, reject) => {
+      try { canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('empty-blob'))), 'image/png'); }
+      catch (e) { reject(e); }
+    });
+  }
+  function triggerBlobDownload(blob, filename) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 200);
+  }
+
   function todayKey() {
     const d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
@@ -301,6 +407,7 @@
         <td class="num">${x.paid ? vnd(x.paid) : '–'}</td>
         <td>${badge}</td>
         <td class="row-actions">
+          ${x.closing > 0 ? `<button class="btn btn-sm" data-act="qr" data-id="${esc(x.memberId)}" title="Tạo mã QR chuyển khoản">QR</button>` : ''}
           <button class="btn btn-sm" data-act="pay" data-id="${esc(x.memberId)}" data-amt="${x.closing}">Thu</button>
           <button class="btn btn-sm btn-ghost" data-act="adjust" data-id="${esc(x.memberId)}" title="Điều chỉnh tay">±</button>
         </td></tr>`;
@@ -653,6 +760,26 @@
         <label class="check${wd.includes(i) ? ' on' : ''}">
           <input type="checkbox" data-act="toggle-weekday" data-i="${i}" ${wd.includes(i) ? 'checked' : ''}>
           <span>${d === 'CN' ? 'Chủ nhật' : 'Thứ ' + (i + 1)}</span></label>`).join('')}</div>
+    </section>
+
+    <section class="card">
+      <h2>Nhận tiền qua QR (VietQR)</h2>
+      <p class="sub">Điền số tài khoản để mỗi dòng trong <b>Bảng thu tiền</b> có nút "QR" tạo mã chuyển khoản
+        đúng sẵn số tiền người đó còn thiếu.</p>
+      ${sel('bankBin', 'Ngân hàng', [{ v: '', t: '— Chọn ngân hàng —' }].concat(
+          BANKS.map((b) => ({ v: b.bin, t: `${b.name} (${b.code})` }))), st.bankBin)
+        .replace('name="bankBin"', 'data-act="set-bank-bin"')}
+      <div class="grid2">
+        ${fld('bkAcc', 'Số tài khoản', 'text', st.bankAccountNo, 'data-act="set-bank-stk" inputmode="numeric"')}
+        ${fld('bkName', 'Tên chủ tài khoản', 'text', st.bankAccountName, 'data-act="set-bank-holder" placeholder="NGUYEN VAN A"')}
+      </div>
+      <label class="field"><span>Mẫu nội dung chuyển khoản</span>
+        <input type="text" value="${esc(st.transferTemplate)}" data-act="set-transfer-template"></label>
+      <p class="hint">Dùng <code>{ten}</code>, <code>{thang}</code>, <code>{nam}</code>, <code>{club}</code> —
+        app tự thay bằng tên người đóng/tháng/năm/tên CLB, rồi bỏ dấu + viết hoa cho hợp với mọi ngân hàng.</p>
+      ${st.bankBin && st.bankAccountNo
+        ? `<div class="note info">Đã sẵn sàng: ${esc(st.bankShortName)} · STK ${esc(st.bankAccountNo)}${st.bankAccountName ? ' · ' + esc(st.bankAccountName) : ''}</div>`
+        : `<div class="note">Chưa đủ thông tin — chọn ngân hàng và nhập số tài khoản để dùng được nút QR.</div>`}
     </section>
 
     <section class="card">
@@ -1068,6 +1195,77 @@
       if (!confirm('Xoá khoản điều chỉnh này?')) return;
       mutate((db) => { db.adjustments = db.adjustments.filter((a) => a.id !== id); });
     },
+
+    /* ---- QR chuyển khoản ---- */
+    'qr'(el) {
+      const st = S.db.settings;
+      if (!st.bankBin || !st.bankAccountNo) {
+        toast('Chưa cấu hình ngân hàng nhận tiền — vào tab Cài đặt để thêm số tài khoản.', true);
+        return;
+      }
+      const r = rep();
+      const x = r.rows.find((row) => row.memberId === el.dataset.id);
+      if (!x) return;
+      const amount = Math.round(x.closing);
+      if (amount <= 0) { toast(`${x.name} không còn phải đóng khoản nào.`); return; }
+
+      const [y, m] = S.month.split('-');
+      const rawInfo = renderQrTemplate(st.transferTemplate, {
+        ten: x.name, thang: String(Number(m)), nam: y, club: st.clubName || '',
+      });
+      const info = stripDiacritics(rawInfo).toUpperCase().replace(/[^A-Z0-9 ]/g, '').trim() || 'CHUYEN TIEN SAN CAU';
+      const holder = stripDiacritics(st.bankAccountName || '').toUpperCase().trim();
+      const qrUrl = 'https://img.vietqr.io/image/' + encodeURIComponent(st.bankBin) +
+        '-' + encodeURIComponent(st.bankAccountNo) + '-compact2.png' +
+        '?amount=' + amount + '&addInfo=' + encodeURIComponent(info) +
+        (holder ? '&accountName=' + encodeURIComponent(holder) : '');
+
+      const body = `
+        <div style="text-align:center">
+          <img src="${esc(qrUrl)}" alt="QR chuyển khoản" style="max-width:100%;border-radius:12px;border:1px solid var(--line)">
+          <div style="margin-top:14px;font-size:17px;font-weight:700">${esc(x.name)} — ${vnd(amount)}</div>
+          <div class="muted small" style="margin-top:4px">${esc(st.bankShortName || '')} · STK ${esc(st.bankAccountNo)}${holder ? ' · ' + esc(holder) : ''}</div>
+          <div class="muted small" style="margin-top:2px">Nội dung: ${esc(info)}</div>
+        </div>
+        <div class="toolbar" style="justify-content:center;margin-top:16px">
+          <button type="button" class="btn btn-primary" data-act="download-qr"
+            data-qrurl="${esc(qrUrl)}" data-name="${esc(x.name)}" data-amount="${amount}"
+            data-note="${esc(info)}" data-bank="${esc(st.bankShortName || '')}"
+            data-stk="${esc(st.bankAccountNo)}" data-holder="${esc(holder)}">Tải ảnh</button>
+          <button type="button" class="btn" data-act="copy-qr-note" data-note="${esc(info)}">Sao chép nội dung CK</button>
+        </div>`;
+      modal(`QR chuyển khoản — ${x.name}`, body, () => {}, 'Đóng');
+    },
+    async 'download-qr'(el) {
+      const qrUrl = el.dataset.qrurl;
+      try {
+        const img = await loadImageCors(qrUrl);
+        const canvas = buildQrCard(img, [
+          el.dataset.name, vnd(Number(el.dataset.amount)),
+          (el.dataset.bank ? el.dataset.bank + ' · ' : '') + 'STK ' + el.dataset.stk +
+            (el.dataset.holder ? ' · ' + el.dataset.holder : ''),
+          'ND: ' + el.dataset.note,
+        ]);
+        const blob = await canvasToBlob(canvas);
+        triggerBlobDownload(blob, `QR-${slugify(el.dataset.name)}.png`);
+        toast('Đã tải ảnh QR');
+      } catch (e) {
+        // Trình duyệt chặn đọc ảnh cross-origin để ghép — mở ảnh gốc cho người dùng tự lưu.
+        window.open(qrUrl, '_blank');
+        toast('Không ghép được ảnh tự động — đã mở ảnh QR ở tab mới, bạn chạm giữ hoặc chuột phải để lưu.', true);
+      }
+    },
+    async 'copy-qr-note'(el) {
+      try { await navigator.clipboard.writeText(el.dataset.note); toast('Đã sao chép nội dung chuyển khoản'); }
+      catch (e) { toast('Không sao chép được, bạn tự bôi đen nội dung nhé.', true); }
+    },
+    'set-bank-bin'(el) {
+      const b = BANKS.find((x) => x.bin === el.value);
+      mutate((db) => { db.settings.bankBin = el.value; db.settings.bankShortName = b ? b.name : ''; });
+    },
+    'set-bank-stk'(el) { mutate((db) => { db.settings.bankAccountNo = el.value.trim(); }); },
+    'set-bank-holder'(el) { mutate((db) => { db.settings.bankAccountName = el.value.trim(); }); },
+    'set-transfer-template'(el) { mutate((db) => { db.settings.transferTemplate = el.value; }); },
 
     /* ---- xuất dữ liệu ---- */
     async 'copy-msg'() {

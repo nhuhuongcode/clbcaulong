@@ -129,6 +129,19 @@ bấm **Kiểm tra kết nối**. Thấy "Kết nối thành công 🎉" là xon
 
 ---
 
+## Tạo QR chuyển khoản
+
+Tab **Cài đặt** → mục *Nhận tiền qua QR (VietQR)* → chọn ngân hàng, nhập số tài khoản
+(và tên chủ tài khoản nếu muốn). Sau đó ở tab **Bảng thu tiền**, mỗi người còn nợ sẽ có
+nút **QR** — bấm vào sẽ hiện mã QR có sẵn đúng số tiền người đó cần đóng và nội dung
+chuyển khoản (mặc định: tên người đóng + tháng/năm, tự bỏ dấu cho hợp với mọi ngân hàng).
+Bấm **Tải ảnh** để lưu về máy, gửi cho người cần đóng qua Zalo/Messenger.
+
+Mã QR do [VietQR.io](https://vietqr.io) tạo — chuẩn dùng chung giữa các ngân hàng Việt Nam,
+quét được bằng mọi app ngân hàng hỗ trợ chuyển nhanh Napas 247.
+
+---
+
 ## Mẹo
 
 - **Nghỉ buổi nào** thì xoá buổi đó trong tab *Buổi đánh* — tiền sân của nhóm đó tự giảm.

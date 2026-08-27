@@ -133,6 +133,12 @@
         guestFeePerSession: 50000,
         roundStep: 1000,
         defaultWeekdays: [2, 4], // Thứ 3 & Thứ 5 (0 = CN)
+        // Nhận tiền qua VietQR — để trống nút "QR" ở Bảng thu tiền sẽ nhắc cấu hình trước.
+        bankBin: '',
+        bankShortName: '',
+        bankAccountNo: '',
+        bankAccountName: '',
+        transferTemplate: '{ten} DONG TIEN SAN CAU T{thang}/{nam}',
       },
       members: [],
       months: [],
