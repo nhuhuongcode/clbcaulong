@@ -61,7 +61,7 @@ body{
 }
 .spacer{flex:1}
 
-main{max-width:1120px; margin:0 auto; padding:18px 16px 80px}
+main{max-width:1440px; margin:0 auto; padding:18px 24px 80px}
 
 /* ----------------------------------------------------------------- cards */
 /* tăng padding + min-height cho card, đảm bảo không bị ẩn nội dung */
@@ -96,7 +96,7 @@ main{max-width:1120px; margin:0 auto; padding:18px 16px 80px}
 .stat.hl .v{color:var(--accent)}
 
 /* ---------------------------------------------------------------- tables */
-.table-wrap{overflow-x:auto; -webkit-overflow-scrolling:touch; margin:0 -16px; padding:0 16px}
+.table-wrap{overflow-x:auto; -webkit-overflow-scrolling:touch; margin:0 -24px; padding:0 24px}
 table{border-collapse:collapse; width:100%; font-size:14px; min-width:560px}
 th,td{padding:9px 10px; text-align:left; border-bottom:1px solid var(--line); white-space:nowrap}
 th{font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:600}
@@ -159,7 +159,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent-soft); bo
 /* ----------------------------------------------------------------- modal */
 dialog{
   border:0; border-radius:14px; padding:0; background:var(--panel); color:var(--text);
-  box-shadow:0 20px 40px rgba(16,24,40,.2); max-width:min(520px,92vw); width:100%;
+  box-shadow:0 20px 40px rgba(16,24,40,.2); max-width:min(640px,92vw); width:100%;
 }
 dialog::backdrop{background:rgba(16,24,40,.45)}
 dialog form{padding:20px}
@@ -191,6 +191,6 @@ ol.steps code{background:var(--panel-2); padding:1px 6px; border-radius:5px; fon
 @media (max-width:560px){
   .grid2{grid-template-columns:1fr}
   main{padding:14px 12px 80px}
-  .card{padding:14px}
-  .table-wrap{margin:0 -14px; padding:0 14px}
+  .card{padding:14px 16px}
+  .table-wrap{margin:0 -16px; padding:0 16px}
 }
